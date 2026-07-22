@@ -9,14 +9,15 @@ in real agronomic research paper abstracts, with citations.
 ## Architecture
 
 ```
-PubMed E-utilities API (abstracts)
+PubMed E-utilities API (478 real papers, 5 agronomic search terms)
         ↓
-chunking.py  →  sentence-group chunks
+chunking.py  →  sentence-group chunks (483 chunks)
         ↓
-embed.py  →  SciBERT (mean-pooled) embeddings  →  Chroma vector store
+embed.py  →  pritamdeka/S-PubMedBert-MS-MARCO (retrieval-tuned)  →  Chroma vector store
         ↓
-retriever.py  →  Semantic search (retrieval-tuned embeddings)
-                  [hybrid BM25+RRF available via config, off by default — see Results]
+retriever.py  →  Semantic search (default)
+                  [hybrid BM25+RRF available via config.use_hybrid — validated
+                   to hurt relevance in 6/10 test queries, off by default]
         ↓
 generator.py  →  local LLM (Qwen2.5-1.5B-Instruct)  →  synthesized answer + citations
         ↓
@@ -26,7 +27,8 @@ ragas_eval.py  →  same local LLM as judge  →  faithfulness / relevancy / pre
 ```
 
 Fully local and free — no API keys, no per-query cost, no external LLM
-service of any kind. Both generation and evaluation reuse the same small
+service of any kind (PubMed's API is free and public, not an LLM service).
+Both generation and evaluation reuse the same small
 open-source model running via HuggingFace transformers on your own machine.
 
 ## Quickstart
@@ -88,8 +90,12 @@ to 3 requests/second (10/second if you register a free NCBI API key).
 
 ## Tech Stack
 
-`transformers` (SciBERT + Qwen2.5-1.5B-Instruct) · `ChromaDB` · `rank-bm25` ·
-`FastAPI` · `Gradio` · `Docker` · `GitHub Actions` · `RAGAS` (local judge)
+`sentence-transformers` (PubMedBert-MS-MARCO) · `transformers` (Qwen2.5-1.5B-Instruct) ·
+`ChromaDB` · `FastAPI` · `Gradio` · `Docker` · `GitHub Actions` · `RAGAS` (local judge)
+
+`rank-bm25` is included for the optional hybrid retrieval path
+(`retrieval.use_hybrid: true`) but is not part of the default pipeline —
+see Results below for why.
 
 Fully local and API-key-free throughout — both answer generation and RAGAS
 evaluation are powered by the same small open-source model running on your
