@@ -1,0 +1,79 @@
+project:
+  name: agri-rag-system
+  author: Linlin Zhang
+  github: linz21
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  chroma_dir: data/chroma_db
+  n_papers_target: 400
+
+pubmed:
+  # NCBI E-utilities — free, no key required, but rate-limited to 3 req/s
+  # without an API key (10 req/s with one — free to register at
+  # https://www.ncbi.nlm.nih.gov/account/settings/)
+  base_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+  search_terms:
+    - "corn yield prediction machine learning"
+    - "crop yield remote sensing"
+    - "precision agriculture soil health"
+    - "corn drought stress physiology"
+    - "agronomic nitrogen management yield"
+  email: "REPLACE_WITH_YOUR_EMAIL@example.com"  # required by NCBI usage policy
+  api_key: null  # optional, set via PUBMED_API_KEY env var for higher rate limit
+  retmax_per_term: 100  # max results per search term
+
+chunking:
+  strategy: "section"  # section-based chunking (falls back to paragraph if no sections found)
+  chunk_size_tokens: 512
+  chunk_overlap_tokens: 50
+
+embeddings:
+  # NOTE: original plan specified "SciBERT" — SciBERT itself is a base BERT
+  # encoder, not natively a sentence-embedding model. Using it for retrieval
+  # requires a pooling strategy (mean-pooling over token embeddings) or a
+  # sentence-transformers wrapper trained for retrieval. See Known Gaps.
+  model_name: "allenai/scibert_scivocab_uncased"
+  pooling_strategy: "mean"
+  embedding_dim: 768
+  batch_size: 16
+
+vector_store:
+  provider: "chroma"
+  collection_name: "agri_papers"
+  persist_dir: data/chroma_db
+
+retrieval:
+  top_k_semantic: 10
+  top_k_bm25: 10
+  top_k_final: 5          # after reranking/fusion
+  fusion_method: "rrf"    # reciprocal rank fusion — combines BM25 + semantic rankings
+
+generation:
+  # Generative answers using a LOCAL open-source LLM — no API key, no
+  # per-query cost. Same free approach as the RAGAS judge below. Honest
+  # trade-off: a 1.5B local model is noticeably weaker than GPT-4/Claude —
+  # expect usable but imperfect synthesis. Swap model_name for a larger
+  # local model if you have more compute and want higher quality.
+  model_name: "Qwen/Qwen2.5-1.5B-Instruct"
+  max_new_tokens: 300
+
+evaluation:
+  # RAGAS metrics require an LLM-as-judge internally — this is inherent to
+  # how RAGAS works. Uses a LOCAL open-source model (see src/evaluation/
+  # local_llm.py) instead of a paid API, keeping the whole project free.
+  # Honest trade-off: a small local model is a weaker judge than GPT-4/
+  # Claude — treat scores as directional signal, not an absolute measure.
+  local_judge_model: "Qwen/Qwen2.5-1.5B-Instruct"
+  local_embeddings_model: "sentence-transformers/all-MiniLM-L6-v2"
+  metrics: ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]
+  golden_dataset_path: "data/processed/golden_qa_pairs.json"
+
+api:
+  host: 0.0.0.0
+  port: 8002  # different port from Project 1 (8000) and Project 2 (8001)
+
+frontend:
+  provider: "gradio"
+  port: 7860

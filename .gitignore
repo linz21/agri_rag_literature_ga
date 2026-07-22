@@ -1,0 +1,23 @@
+cat << 'EOF' > .gitignore
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+data/raw/
+data/processed/
+data/chroma_db/
+
+models/
+reports/
+
+*.ipynb_checkpoints/
+dist/
+*.egg
+
+.DS_Store
+Miniforge*.sh
+Miniconda*.sh
+EOF
