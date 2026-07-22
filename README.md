@@ -15,7 +15,8 @@ chunking.py  →  sentence-group chunks
         ↓
 embed.py  →  SciBERT (mean-pooled) embeddings  →  Chroma vector store
         ↓
-retriever.py  →  Hybrid search: BM25 + semantic  →  Reciprocal Rank Fusion
+retriever.py  →  Semantic search (retrieval-tuned embeddings)
+                  [hybrid BM25+RRF available via config, off by default — see Results]
         ↓
 generator.py  →  local LLM (Qwen2.5-1.5B-Instruct)  →  synthesized answer + citations
         ↓
@@ -70,7 +71,8 @@ python src/frontend/app.py   # → http://localhost:7860
 
 ## Using Real PubMed Data
 
-To move beyond the demo corpus and pull real agronomic research abstracts:
+Validated: this has been run successfully against 478 real papers across 5
+agronomic search terms (see Results above). To reproduce or pull fresh data:
 
 ```bash
 # Edit configs/config.yaml — set pubmed.email to your real email
@@ -95,14 +97,13 @@ own machine, not a paid API.
 
 ## Results
 
-Validated end-to-end on the demo corpus (30 synthetic papers). Real PubMed
-data and a golden evaluation dataset are the next steps — RAGAS metrics
-below remain TBD until both exist.
+Validated end-to-end on real PubMed data (478 papers, 483 chunks, fetched
+2026-07-22 across 5 agronomic search terms).
 
 | Metric | Value |
 |--------|-------|
-| Corpus size | 30 papers → 30 chunks (demo data) |
-| Retrieval | Working — correctly ranks topically relevant papers (validated manually) |
+| Corpus size | 478 real papers → 483 chunks |
+| Retrieval — embedding model | `pritamdeka/S-PubMedBert-MS-MARCO` (retrieval-tuned) |
 | Generation | Working — coherent, grounded, cited answers confirmed by manual review |
 | Generation latency (CPU, Qwen2.5-1.5B-Instruct) | ~90 seconds per question |
 | Faithfulness | TBD — requires golden dataset |
@@ -114,6 +115,49 @@ below remain TBD until both exist.
 for zero-cost local inference. A GPU, a smaller/quantized model, or batching
 would bring this down significantly — worth stating plainly rather than
 hiding behind a vague "TBD."
+
+### Validated finding: semantic-only retrieval outperforms hybrid (BM25 + semantic) on this corpus
+
+**Embedding model choice** (tested first): SciBERT (mean-pooled) vs.
+`pritamdeka/S-PubMedBert-MS-MARCO` (retrieval-tuned). The retrieval-tuned
+model scored 5/5 on-topic vs. SciBERT's 4/5 on a single test query — a
+promising early signal that led to switching the default embedding model.
+
+**Hybrid vs. semantic-only** (tested properly, across 10 queries): rather
+than assume RRF fusion of BM25 + semantic search was strictly better (the
+original plan), retrieval was compared side-by-side across 10 queries —
+5 broad conceptual questions matching the corpus's search topics, plus 5
+queries specifically chosen to give BM25 its best possible chance (exact
+gene names, species names, technical acronyms):
+
+| Query type | BM25's effect on relevance |
+|---|---|
+| Nitrogen timing | Hurt — dropped 2 precise maize-nitrogen matches |
+| Remote sensing yield | Hurt — dropped the most directly on-topic review paper |
+| Soil health | Mixed — no clear winner either way |
+| Drought stress physiology | Hurt — dropped a specific gene study for tangential papers |
+| ML yield prediction | Hurt — dropped a systematic review for an unrelated processing paper |
+| Exact gene name (ZmWRKY74) | Mixed/slight hurt — even BM25's ideal case showed no clean win |
+| Species/compound names (Aspergillus, aflatoxin) | Neutral/slight help — one good addition, one unrelated addition |
+| Acronym (UAV) | Neutral — swapped one good match for another |
+| Technical term (CRISPR) | Hurt — dropped stress-relevant papers for tangential ones |
+| Broad control query | Hurt — added an unrelated livestock/manure paper |
+
+**Result: 6/10 queries hurt, 4/10 mixed or neutral, 0/10 a clean win for
+hybrid** — including in the 4 queries specifically designed to favor BM25's
+exact-match strength. Two specific papers recurred as false positives
+across 4+ unrelated queries (a UAV/ResNet50 crop-classification paper and
+a generic "computational biology" review), indicating BM25 was matching on
+shared generic terms rather than genuinely relevant exact-term hits.
+
+**Decision:** semantic-only is now the default retrieval mode
+(`retrieval.use_hybrid: false` in `configs/config.yaml`). BM25/RRF fusion
+code remains available (`use_hybrid: true`) since a different corpus or
+query style could plausibly favor it — but it is not the default given
+this corpus's measured behavior. Diagnostic scripts used to generate this
+evidence are kept in `scripts/compare_retrieval_modes.py` and
+`scripts/compare_retrieval_modes_batch.py` for future re-validation if the
+corpus changes significantly (e.g. after adding many more papers).
 
 ## Project Structure
 

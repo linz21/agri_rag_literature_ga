@@ -69,9 +69,9 @@ class HybridRetriever:
 
     def _get_embedder(self):
         if self._embedder is None:
-            from src.embeddings.embed import SciBERTEmbedder
+            from src.embeddings.embed import RetrievalEmbedder
             embed_cfg = self.cfg["embeddings"]
-            self._embedder = SciBERTEmbedder(embed_cfg["model_name"], pooling=embed_cfg["pooling_strategy"])
+            self._embedder = RetrievalEmbedder(embed_cfg["model_name"])
         return self._embedder
 
     def bm25_search(self, query: str, top_k: int) -> list[str]:
@@ -86,14 +86,28 @@ class HybridRetriever:
         results = self.collection.query(query_embeddings=[query_embedding], n_results=top_k)
         return results["ids"][0] if results["ids"] else []
 
-    def search(self, query: str, top_k: int = None) -> list[dict]:
-        top_k = top_k or self.retrieval_cfg["top_k_final"]
+    def search(self, query: str, top_k: int = None, use_hybrid: bool = None) -> list[dict]:
+        """
+        Retrieve the top_k most relevant chunks for a query.
 
-        bm25_ids = self.bm25_search(query, self.retrieval_cfg["top_k_bm25"])
+        Defaults to semantic-only retrieval (see config.yaml's retrieval.use_hybrid
+        comment for the full evidence trail). Pass use_hybrid=True explicitly, or
+        set retrieval.use_hybrid: true in config, to enable BM25 + RRF fusion —
+        validated to measurably hurt relevance on this corpus in 6/10 test
+        queries, so it is off by default rather than silently active.
+        """
+        top_k = top_k or self.retrieval_cfg["top_k_final"]
+        if use_hybrid is None:
+            use_hybrid = self.retrieval_cfg.get("use_hybrid", False)
+
         semantic_ids = self.semantic_search(query, self.retrieval_cfg["top_k_semantic"])
 
-        fused = reciprocal_rank_fusion([bm25_ids, semantic_ids])
-        top_ids = [doc_id for doc_id, _ in fused[:top_k]]
+        if not use_hybrid:
+            top_ids = semantic_ids[:top_k]
+        else:
+            bm25_ids = self.bm25_search(query, self.retrieval_cfg["top_k_bm25"])
+            fused = reciprocal_rank_fusion([bm25_ids, semantic_ids])
+            top_ids = [doc_id for doc_id, _ in fused[:top_k]]
 
         return [self.chunk_by_id[doc_id] for doc_id in top_ids if doc_id in self.chunk_by_id]
 

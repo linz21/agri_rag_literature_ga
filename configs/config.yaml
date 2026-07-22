@@ -30,12 +30,11 @@ chunking:
   chunk_overlap_tokens: 50
 
 embeddings:
-  # NOTE: original plan specified "SciBERT" — SciBERT itself is a base BERT
-  # encoder, not natively a sentence-embedding model. Using it for retrieval
-  # requires a pooling strategy (mean-pooling over token embeddings) or a
-  # sentence-transformers wrapper trained for retrieval. See Known Gaps.
-  model_name: "allenai/scibert_scivocab_uncased"
-  pooling_strategy: "mean"
+  # Retrieval-tuned biomedical model (fine-tuned on MS-MARCO for passage
+  # retrieval) — replaces an earlier SciBERT-mean-pooling approach after
+  # real-data testing showed it surfaced some clearly off-topic results
+  # (e.g. an aflatoxin paper ranking for a nitrogen-timing query).
+  model_name: "pritamdeka/S-PubMedBert-MS-MARCO"
   embedding_dim: 768
   batch_size: 16
 
@@ -45,10 +44,22 @@ vector_store:
   persist_dir: data/chroma_db
 
 retrieval:
+  # Default: semantic-only. Validated across 10 test queries (see README
+  # "Validated finding" section) — hybrid (BM25 + semantic + RRF fusion)
+  # clearly hurt relevance in 6/10 queries, was neutral/mixed in 4/10, and
+  # never produced an unambiguous improvement even in queries specifically
+  # designed to favor BM25 (exact gene names, species names, acronyms).
+  # Two papers recurred as false positives across 4+ unrelated queries,
+  # indicating BM25 was over-matching on generic shared terms rather than
+  # finding genuinely relevant exact-term hits. Code kept available via
+  # use_hybrid: true for cases where exact keyword matching may help with
+  # a different corpus or query style — but not the default given this
+  # corpus's measured behavior.
+  use_hybrid: false
   top_k_semantic: 10
   top_k_bm25: 10
   top_k_final: 5          # after reranking/fusion
-  fusion_method: "rrf"    # reciprocal rank fusion — combines BM25 + semantic rankings
+  fusion_method: "rrf"    # reciprocal rank fusion — combines BM25 + semantic rankings, only used if use_hybrid: true
 
 generation:
   # Generative answers using a LOCAL open-source LLM — no API key, no

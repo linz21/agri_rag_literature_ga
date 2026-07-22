@@ -1,18 +1,25 @@
 """
 Embedding generation and vector store indexing using Chroma.
 
-IMPORTANT DESIGN NOTE on SciBERT: SciBERT (allenai/scibert_scivocab_uncased)
-is a base BERT encoder pretrained on scientific text — it is NOT natively a
-sentence-embedding model like models trained specifically for retrieval
-(e.g. sentence-transformers' all-MiniLM, or retrieval-tuned models like
-pritamdeka/S-PubMedBert-MS-MARCO). Using SciBERT for retrieval requires
-mean-pooling over token embeddings, which is what this module does — but
-this is a weaker retrieval signal than a model actually trained with a
-contrastive/retrieval objective. This was the explicit original plan
-("SciBERT"), so it's implemented as specified, but see README Known Gaps
-for a stronger alternative if retrieval quality turns out to be weak
-(this is exactly the kind of thing worth validating empirically, the same
-way Project 2's LSTM assumptions were tested rather than assumed correct).
+Uses `pritamdeka/S-PubMedBert-MS-MARCO` — a biomedical BERT model
+specifically FINE-TUNED FOR RETRIEVAL on MS-MARCO (the standard passage-
+retrieval benchmark dataset). This replaces an earlier version that used
+raw SciBERT with manual mean-pooling.
+
+WHY THIS CHANGE: SciBERT is a base encoder pretrained on scientific text,
+but never trained with a retrieval objective — mean-pooling its token
+embeddings is a reasonable fallback, but a genuinely weaker signal than a
+model actually trained to place semantically-similar query/passage pairs
+close together in embedding space. This was flagged as a real, testable
+design uncertainty when SciBERT was first used — validated empirically by
+manually inspecting retrieval quality on real PubMed data (478 papers):
+SciBERT's semantic search surfaced some clearly off-topic results (e.g. an
+aflatoxin-prediction paper ranking for a nitrogen-timing query). Switching
+to a retrieval-tuned model should measurably improve this.
+
+Distributed via `sentence-transformers`, which handles the correct pooling
+strategy internally (as trained), rather than requiring manual mean-pooling
+code — simpler and more correct than the previous approach.
 
 Usage:
     python src/embeddings/embed.py
@@ -24,53 +31,49 @@ import logging
 from pathlib import Path
 
 import numpy as np
-import torch
 import yaml
-from transformers import AutoModel, AutoTokenizer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s")
 log = logging.getLogger(__name__)
 
 
-class SciBERTEmbedder:
-    def __init__(self, model_name: str, pooling: str = "mean", device: str = None):
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModel.from_pretrained(model_name).to(self.device)
-        self.model.eval()
-        self.pooling = pooling
+class RetrievalEmbedder:
+    """
+    Thin wrapper around sentence-transformers for a retrieval-tuned model.
+    Kept as a class (rather than calling SentenceTransformer directly
+    everywhere) so retriever.py's usage doesn't need to change regardless
+    of which underlying embedding approach is used.
+    """
 
-    def _mean_pool(self, token_embeddings: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-        mask = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-        summed = torch.sum(token_embeddings * mask, dim=1)
-        counts = torch.clamp(mask.sum(dim=1), min=1e-9)
-        return summed / counts
+    def __init__(self, model_name: str):
+        from sentence_transformers import SentenceTransformer
+        log.info(f"Loading retrieval-tuned embedding model: {model_name} ...")
+        self.model = SentenceTransformer(model_name)
 
     def embed(self, texts: list[str], batch_size: int = 16) -> np.ndarray:
-        all_embeddings = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            inputs = self.tokenizer(
-                batch, padding=True, truncation=True, max_length=512, return_tensors="pt"
-            ).to(self.device)
-
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                if self.pooling == "mean":
-                    embeddings = self._mean_pool(outputs.last_hidden_state, inputs["attention_mask"])
-                else:  # cls
-                    embeddings = outputs.last_hidden_state[:, 0, :]
-
-            all_embeddings.append(embeddings.cpu().numpy())
-
-        return np.vstack(all_embeddings)
+        return self.model.encode(
+            texts, batch_size=batch_size, show_progress_bar=False, convert_to_numpy=True
+        )
 
 
-def build_vector_store(chunks: list[dict], embedder: SciBERTEmbedder, cfg: dict):
+def build_vector_store(chunks: list[dict], embedder: RetrievalEmbedder, cfg: dict):
     import chromadb
 
     vs_cfg = cfg["vector_store"]
     client = chromadb.PersistentClient(path=vs_cfg["persist_dir"])
+
+    # Delete and recreate the collection fresh each time — prevents stale
+    # entries from a previous embedding model/corpus lingering alongside
+    # new ones (this exact issue was hit and fixed during real-data testing:
+    # leftover demo-data chunks caused a KeyError during retrieval after
+    # switching to real PubMed data, because upsert() doesn't remove IDs
+    # that aren't in the new batch).
+    try:
+        client.delete_collection(name=vs_cfg["collection_name"])
+        log.info(f"Cleared existing collection '{vs_cfg['collection_name']}' before rebuilding.")
+    except Exception:
+        pass  # collection didn't exist yet — fine on first run
+
     collection = client.get_or_create_collection(name=vs_cfg["collection_name"])
 
     texts = [c["text"] for c in chunks]
@@ -80,10 +83,9 @@ def build_vector_store(chunks: list[dict], embedder: SciBERTEmbedder, cfg: dict)
         for c in chunks
     ]
 
-    log.info(f"Embedding {len(texts)} chunks with {cfg['embeddings']['model_name']} ...")
+    log.info(f"Embedding {len(texts)} chunks ...")
     embeddings = embedder.embed(texts, batch_size=cfg["embeddings"]["batch_size"])
 
-    # Chroma upsert in batches to avoid overly large single calls
     batch_size = 100
     for i in range(0, len(ids), batch_size):
         collection.upsert(
@@ -113,7 +115,7 @@ def main():
         chunks = json.load(f)
 
     embed_cfg = cfg["embeddings"]
-    embedder = SciBERTEmbedder(embed_cfg["model_name"], pooling=embed_cfg["pooling_strategy"])
+    embedder = RetrievalEmbedder(embed_cfg["model_name"])
 
     build_vector_store(chunks, embedder, cfg)
 

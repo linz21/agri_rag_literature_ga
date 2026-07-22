@@ -74,6 +74,41 @@ class TestRetrievalFusion:
         fused_ids = [doc_id for doc_id, _ in fused]
         assert fused_ids == ["a", "b", "c"]
 
+    def test_search_defaults_to_semantic_only(self, monkeypatch):
+        """
+        Documents a real design decision: semantic-only is the default,
+        NOT hybrid, based on empirical testing across 10 queries showing
+        BM25 hurt relevance in 6/10 cases (see README). This test confirms
+        that default without needing a real corpus/model — it patches the
+        two search methods and checks which one(s) get called.
+        """
+        import types
+        from src.retrieval.retriever import HybridRetriever
+
+        # Build a minimal fake instance without running __init__
+        # (avoids needing a real Chroma DB / chunks.json / model download)
+        retriever = HybridRetriever.__new__(HybridRetriever)
+        retriever.retrieval_cfg = {"use_hybrid": False, "top_k_final": 5,
+                                   "top_k_semantic": 10, "top_k_bm25": 10}
+        retriever.chunk_by_id = {"a": {"chunk_id": "a"}, "b": {"chunk_id": "b"}}
+
+        bm25_called = {"value": False}
+
+        def fake_semantic_search(self, query, top_k):
+            return ["a", "b"]
+
+        def fake_bm25_search(self, query, top_k):
+            bm25_called["value"] = True
+            return ["b", "a"]
+
+        retriever.semantic_search = types.MethodType(fake_semantic_search, retriever)
+        retriever.bm25_search = types.MethodType(fake_bm25_search, retriever)
+
+        results = retriever.search("test query")
+
+        assert bm25_called["value"] is False, "BM25 should NOT be called when use_hybrid=False (the default)"
+        assert len(results) == 2
+
 
 class TestGenerationPromptBuilding:
     """
