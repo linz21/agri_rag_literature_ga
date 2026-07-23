@@ -1,0 +1,22 @@
+# Trimmed for HF Spaces deployment — inference only, not the full dev/eval
+# stack. Excludes ragas, langchain, datasets, fastapi, uvicorn, pytest,
+# httpx (dev/eval-only dependencies, not needed for serving inference).
+#
+# NOTE: rank-bm25 IS still required even though retrieval.use_hybrid is
+# false by default — HybridRetriever's __init__ unconditionally builds a
+# BM25 index at startup (only the *search* path skips using it when hybrid
+# is disabled). It's a small, pure-Python package, so no real cost to
+# keeping it.
+
+pyyaml==6.0.1
+numpy==1.26.4
+
+transformers==4.42.3
+torch==2.3.0
+accelerate==0.32.1
+sentence-transformers==3.0.1
+
+chromadb==0.5.3
+rank-bm25==0.2.2
+
+gradio==4.44.0
