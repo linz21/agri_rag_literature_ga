@@ -10,7 +10,11 @@ pushing — see Step 3 below.
 2. Owner: your account. Space name: e.g. `agri-rag-assistant`
 3. License: your choice (e.g. MIT)
 4. **SDK: Gradio**
-5. Hardware: **CPU basic (free)**
+5. **Hardware: ZeroGPU** — as of a 2026 policy change, new free accounts
+   can only create Gradio Spaces on ZeroGPU (free, shared GPU pool) or
+   PRO-gated CPU Basic. ZeroGPU is selected automatically for free
+   accounts and works well here — see app.py's docstring for the
+   `@spaces.GPU` pattern this deployment uses.
 6. Click **Create Space**
 
 ## Step 2 — Clone the new (empty) Space repo locally
@@ -75,12 +79,12 @@ generator ~3GB).
 
 ## Known limitations of this deployment
 
-- **CPU-only free tier** — generation takes ~60-90s/question, same as local
-  testing. A paid GPU tier would speed this up significantly but isn't
-  necessary to demonstrate the system working correctly.
+- **ZeroGPU quota** — free tier provides a limited daily GPU-time budget
+  shared across all your ZeroGPU Spaces (Hugging Face's PRO tier extends
+  this quota if it becomes a constraint for demo purposes).
 - **Cold starts** — if the Space goes to sleep after inactivity (free tier
   default), the first request after waking will be slower while models
-  reload into memory.
+  reload into memory and the first GPU allocation happens.
 - **Chroma index is static** — this deployment ships the vector index
   built from the corpus at the time it was copied in. To update with new
   papers, rebuild the index locally (`python src/embeddings/embed.py`)

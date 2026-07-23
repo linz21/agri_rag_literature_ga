@@ -6,6 +6,14 @@ A retrieval-augmented generation (RAG) system that answers questions about
 corn yield, precision agriculture, and crop science by grounding responses
 in real agronomic research paper abstracts, with citations.
 
+## Live Demo
+
+Deployed on Hugging Face Spaces (free ZeroGPU tier, no API key):
+**[huggingface.co/spaces/lzhang2026/agri-rag-assistant](https://huggingface.co/spaces/lzhang2026/agri-rag-assistant)**
+
+> Note: this runs on shared, on-demand GPU hardware — the first question
+> after the Space wakes from idle may take longer while models load.
+
 ## Architecture
 
 ```
@@ -117,6 +125,19 @@ Validated end-to-end on real PubMed data (478 papers, 483 chunks, fetched
 | Context precision | 0.863 (10/10 valid) |
 | Context recall | 1.000 (10/10 valid) |
 
+**Notes on evaluation:** golden dataset of 10 questions curated manually — for
+each question, real chunks were retrieved from the corpus and a ground-truth
+answer written based on what those passages actually say (not from general
+knowledge or an external LLM's ungrounded answer, which would measure
+corpus-vs-general-knowledge overlap rather than retrieval quality). One
+question (Aspergillus/aflatoxin) scored far below the others across all
+three non-recall metrics — this matches a weakness identified independently
+during manual curation, where only 2 of 5 retrieved passages were genuinely
+on-topic. Faithfulness's 50% parse-failure rate is a known, stated cost of
+using a small (1.5B parameter) local model as RAGAS's judge instead of a
+frontier model like GPT-4/Claude.
+| Context precision | TBD — requires golden dataset |
+| Context recall | TBD — requires golden dataset |
 
 ## Project Structure
 

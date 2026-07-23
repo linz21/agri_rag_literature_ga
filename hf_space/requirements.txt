@@ -7,16 +7,34 @@
 # BM25 index at startup (only the *search* path skips using it when hybrid
 # is disabled). It's a small, pure-Python package, so no real cost to
 # keeping it.
+#
+# `spaces` is required for the @spaces.GPU decorator used by ZeroGPU
+# Spaces — see app.py's docstring for why this Space uses ZeroGPU instead
+# of CPU Basic (a 2026 policy change to HF's free tier).
+#
+# torch MUST be one of ZeroGPU's supported versions (2.11.0, 2.10.0, 2.9.1,
+# 2.8.0 as of this deployment) — the Space's own "Configuration error"
+# message names the exact supported list if this ever needs updating.
+# This is DIFFERENT from the local dev environment's torch==2.3.0 (see
+# main project's requirements.txt) — that's fine, these are separate
+# execution environments with separate constraints.
+#
+# gradio is intentionally NOT pinned here — README.md's sdk_version field
+# is the correct mechanism Hugging Face uses to control which Gradio
+# version gets installed for a Gradio-SDK Space. Having it ALSO in
+# requirements.txt was redundant and likely contributed to a
+# gradio_client/pydantic schema bug (TypeError: argument of type 'bool'
+# is not iterable) hit during initial deployment.
+
+spaces
 
 pyyaml==6.0.1
 numpy==1.26.4
 
 transformers==4.42.3
-torch==2.3.0
+torch==2.8.0
 accelerate==0.32.1
 sentence-transformers==3.0.1
 
 chromadb==0.5.3
 rank-bm25==0.2.2
-
-gradio==4.44.0
