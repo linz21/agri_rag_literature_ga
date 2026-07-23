@@ -16,8 +16,10 @@ REQUIRES a golden dataset (question + ground-truth answer pairs) that does
 NOT yet exist — this must be manually curated (see GOLDEN_DATASET_TEMPLATE
 below for the expected structure).
 
-Usage (once golden dataset exists):
-    python src/evaluation/ragas_eval.py
+Usage (once golden dataset exists — run with -m so Python can resolve the
+src.* package imports; running the .py file directly causes
+ModuleNotFoundError: no module named 'src'):
+    python -m src.evaluation.ragas_eval
 """
 
 import argparse
@@ -134,8 +136,22 @@ def main():
 
     out_path = Path("reports/ragas_eval_results.json")
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # RAGAS/pandas return some scores as numpy types (e.g. np.float64, np.nan),
+    # which Python's built-in json module can't serialize directly. Convert
+    # explicitly rather than silently failing after a potentially long run.
+    def _json_safe(obj):
+        import numpy as np
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return None if np.isnan(obj) else float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
     with open(out_path, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(results, f, indent=2, default=_json_safe)
 
     log.info(f"Results saved: {out_path}")
     for r in results:

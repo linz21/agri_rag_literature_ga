@@ -66,6 +66,7 @@ class HybridRetriever:
 
         # Lazy-load the embedder only when semantic search is actually called
         self._embedder = None
+        self._reranker = None
 
     def _get_embedder(self):
         if self._embedder is None:
@@ -86,7 +87,17 @@ class HybridRetriever:
         results = self.collection.query(query_embeddings=[query_embedding], n_results=top_k)
         return results["ids"][0] if results["ids"] else []
 
-    def search(self, query: str, top_k: int = None, use_hybrid: bool = None) -> list[dict]:
+    def _get_reranker(self):
+        if self._reranker is None:
+            from src.retrieval.reranker import CrossEncoderReranker
+            reranker_model = self.retrieval_cfg.get(
+                "reranker_model_name", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+            )
+            self._reranker = CrossEncoderReranker(reranker_model)
+        return self._reranker
+
+    def search(self, query: str, top_k: int = None, use_hybrid: bool = None,
+              use_reranker: bool = None) -> list[dict]:
         """
         Retrieve the top_k most relevant chunks for a query.
 
@@ -95,21 +106,39 @@ class HybridRetriever:
         set retrieval.use_hybrid: true in config, to enable BM25 + RRF fusion —
         validated to measurably hurt relevance on this corpus in 6/10 test
         queries, so it is off by default rather than silently active.
+
+        use_reranker (or retrieval.use_reranker in config) adds a cross-encoder
+        reranking stage on top of the initial candidate list — architecturally
+        different from RRF fusion (see reranker.py docstring). Off by default
+        until empirically validated the same way use_hybrid was.
         """
         top_k = top_k or self.retrieval_cfg["top_k_final"]
         if use_hybrid is None:
             use_hybrid = self.retrieval_cfg.get("use_hybrid", False)
+        if use_reranker is None:
+            use_reranker = self.retrieval_cfg.get("use_reranker", False)
 
-        semantic_ids = self.semantic_search(query, self.retrieval_cfg["top_k_semantic"])
+        # When reranking, retrieve a WIDER candidate set first (bi-encoder is
+        # fast/broad-recall), then let the cross-encoder narrow it down to
+        # top_k with a more precise, query-aware relevance judgment.
+        candidate_k = self.retrieval_cfg.get("top_k_rerank_candidates", 15) if use_reranker else top_k
+
+        semantic_ids = self.semantic_search(query, max(self.retrieval_cfg["top_k_semantic"], candidate_k))
 
         if not use_hybrid:
-            top_ids = semantic_ids[:top_k]
+            top_ids = semantic_ids[:candidate_k]
         else:
             bm25_ids = self.bm25_search(query, self.retrieval_cfg["top_k_bm25"])
             fused = reciprocal_rank_fusion([bm25_ids, semantic_ids])
-            top_ids = [doc_id for doc_id, _ in fused[:top_k]]
+            top_ids = [doc_id for doc_id, _ in fused[:candidate_k]]
 
-        return [self.chunk_by_id[doc_id] for doc_id in top_ids if doc_id in self.chunk_by_id]
+        candidates = [self.chunk_by_id[doc_id] for doc_id in top_ids if doc_id in self.chunk_by_id]
+
+        if use_reranker:
+            reranker = self._get_reranker()
+            return reranker.rerank(query, candidates, top_k=top_k)
+
+        return candidates[:top_k]
 
 
 def main():

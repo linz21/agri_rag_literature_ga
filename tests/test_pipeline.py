@@ -110,6 +110,59 @@ class TestRetrievalFusion:
         assert len(results) == 2
 
 
+class TestReranker:
+    """
+    Tests the reranker's sorting logic directly, without loading the real
+    cross-encoder model — same reasoning as TestGenerationPromptBuilding:
+    loading a real model is slow and inappropriate for a fast unit test.
+    """
+    def test_rerank_sorts_by_score_descending(self, monkeypatch):
+        from src.retrieval.reranker import CrossEncoderReranker
+
+        reranker = CrossEncoderReranker.__new__(CrossEncoderReranker)
+
+        class FakeModel:
+            def predict(self, pairs):
+                # Return scores in a deliberately non-sorted input order,
+                # to confirm rerank() actually re-sorts rather than just
+                # trusting input order
+                return [0.2, 0.9, 0.5]
+
+        reranker.model = FakeModel()
+
+        candidates = [
+            {"chunk_id": "a", "text": "low relevance"},
+            {"chunk_id": "b", "text": "high relevance"},
+            {"chunk_id": "c", "text": "medium relevance"},
+        ]
+        result = reranker.rerank("test query", candidates, top_k=3)
+
+        assert [c["chunk_id"] for c in result] == ["b", "c", "a"]
+
+    def test_rerank_respects_top_k(self, monkeypatch):
+        from src.retrieval.reranker import CrossEncoderReranker
+
+        reranker = CrossEncoderReranker.__new__(CrossEncoderReranker)
+
+        class FakeModel:
+            def predict(self, pairs):
+                return [0.1, 0.9, 0.5, 0.3]
+
+        reranker.model = FakeModel()
+
+        candidates = [{"chunk_id": str(i), "text": f"doc {i}"} for i in range(4)]
+        result = reranker.rerank("test query", candidates, top_k=2)
+
+        assert len(result) == 2
+        assert result[0]["chunk_id"] == "1"  # highest score (0.9)
+
+    def test_rerank_empty_candidates_returns_empty(self):
+        from src.retrieval.reranker import CrossEncoderReranker
+        reranker = CrossEncoderReranker.__new__(CrossEncoderReranker)
+        result = reranker.rerank("query", [], top_k=5)
+        assert result == []
+
+
 class TestGenerationPromptBuilding:
     """
     Tests the prompt-construction logic directly, WITHOUT loading the actual

@@ -61,6 +61,13 @@ retrieval:
   top_k_final: 5          # after reranking/fusion
   fusion_method: "rrf"    # reciprocal rank fusion — combines BM25 + semantic rankings, only used if use_hybrid: true
 
+  # Cross-encoder reranking — architecturally different from RRF fusion
+  # above (see src/retrieval/reranker.py docstring). Off by default until
+  # empirically tested the same way use_hybrid was.
+  use_reranker: false
+  reranker_model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  top_k_rerank_candidates: 15   # wider candidate set retrieved before reranking narrows to top_k_final
+
 generation:
   # Generative answers using a LOCAL open-source LLM — no API key, no
   # per-query cost. Same free approach as the RAGAS judge below. Honest

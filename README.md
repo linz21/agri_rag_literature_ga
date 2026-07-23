@@ -112,10 +112,11 @@ Validated end-to-end on real PubMed data (478 papers, 483 chunks, fetched
 | Retrieval — embedding model | `pritamdeka/S-PubMedBert-MS-MARCO` (retrieval-tuned) |
 | Generation | Working — coherent, grounded, cited answers confirmed by manual review |
 | Generation latency (CPU, Qwen2.5-1.5B-Instruct) | ~90 seconds per question |
-| Faithfulness | TBD — requires golden dataset |
-| Answer relevancy | TBD — requires golden dataset |
-| Context precision | TBD — requires golden dataset |
-| Context recall | TBD — requires golden dataset |
+| Faithfulness | 0.847 (5/10 valid — local judge failed to parse output on 5/10 questions) |
+| Answer relevancy | 0.752 (10/10 valid) |
+| Context precision | 0.863 (10/10 valid) |
+| Context recall | 1.000 (10/10 valid) |
+
 
 ## Project Structure
 
