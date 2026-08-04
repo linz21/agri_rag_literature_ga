@@ -24,10 +24,30 @@ Usage:
 """
 
 import logging
+import re
 import time
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s")
 log = logging.getLogger(__name__)
+
+# Matches a trailing citation-list line the LLM sometimes appends on its own,
+# e.g. "Sources: [1], [2], [3]" or a bare "[1], [2], [3], [4], [5]" at the
+# very end of the answer. Both the API/local frontend and the HF Space
+# frontend already render a full "Sources:" section with titles below the
+# answer, so leaving this in makes the sources appear twice. Requires 2+
+# bracketed numbers so a single inline citation on the last sentence
+# (e.g. "... reduces yield [2].") is left alone — that's a real citation,
+# not a duplicated source dump.
+_TRAILING_CITATION_RE = re.compile(
+    r"\n*\s*(?:\*\*sources?\*\*:?|sources?:)?\s*(?:\[\d+\][\s,]*){2,}\s*$",
+    re.IGNORECASE,
+)
+
+
+def strip_trailing_citation_line(text: str) -> str:
+    """Remove a trailing inline citation-list line from generated text (see
+    _TRAILING_CITATION_RE above for why)."""
+    return _TRAILING_CITATION_RE.sub("", text).rstrip()
 
 
 PROMPT_TEMPLATE = """You are an agricultural research assistant. Answer the question using ONLY the information in the research excerpts below. If the excerpts don't contain enough information to answer confidently, say so explicitly rather than guessing.
@@ -80,6 +100,15 @@ class LocalGenerator:
             do_sample=False,
             top_k=None,
             return_full_text=False,
+            # Fixes a real, observed bug: greedy decoding (do_sample=False)
+            # with no repetition control produced a runaway bracket-citation
+            # loop ("[1] [2] [3]... [53] [5") in a real generated answer.
+            # A gentle repetition_penalty alone (not no_repeat_ngram_size,
+            # which corrupted exact-reproduction content like digits and
+            # tool names in a similar fix applied to a sibling project's
+            # local model) discourages this kind of runaway repetition
+            # without breaking legitimate exact-text reproduction.
+            repetition_penalty=1.05,
         )
 
     @classmethod
@@ -90,7 +119,8 @@ class LocalGenerator:
 
     def generate(self, prompt: str) -> str:
         outputs = self.pipe(prompt)
-        return outputs[0]["generated_text"].strip()
+        text = outputs[0]["generated_text"].strip()
+        return strip_trailing_citation_line(text)
 
 
 def generate_answer(question: str, retrieved_chunks: list[dict], cfg: dict) -> dict:
