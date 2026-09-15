@@ -136,8 +136,7 @@ during manual curation, where only 2 of 5 retrieved passages were genuinely
 on-topic. Faithfulness's 50% parse-failure rate is a known, stated cost of
 using a small (1.5B parameter) local model as RAGAS's judge instead of a
 frontier model like GPT-4/Claude.
-| Context precision | TBD — requires golden dataset |
-| Context recall | TBD — requires golden dataset |
+
 
 ## Project Structure
 
